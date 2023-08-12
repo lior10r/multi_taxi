@@ -52,6 +52,9 @@ class ParallelEnvRunner:
         '''
         This is the function used to train the policy
         '''
+        config = self.config.to_dict()
+        config.update({"monitor": True})
+
         tune.run(
             self.algorithm_name,
             name=self.algorithm_name,
@@ -59,7 +62,8 @@ class ParallelEnvRunner:
             checkpoint_freq=10,
             checkpoint_score_attr="episode_reward_mean",
             local_dir="ray_results/" + self.env_name,
-            config=self.config.to_dict(),
+            config=config,
+            resume="AUTO"
         )
 
 
