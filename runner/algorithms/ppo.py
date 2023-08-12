@@ -1,6 +1,6 @@
-from .algo_creator import AlgoCreator
-
+from algo_creator import AlgoCreator
 from ray.rllib.algorithms.ppo import PPO, PPOConfig
+
 
 class PPOCreator(AlgoCreator):
 
