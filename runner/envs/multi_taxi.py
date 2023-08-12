@@ -15,13 +15,19 @@ class MultiTaxiCreator(EnvCreator):
     @staticmethod
     def create_env():
         # Setup a custom reward table base on the default one
+        # Negetive rewards
         custom_reward_table = TAXI_ENVIRONMENT_REWARDS
+        custom_reward_table[Event.STANDBY_ENGINE_ON] = -3
         custom_reward_table[Event.BAD_DROPOFF] = -10
         custom_reward_table[Event.BAD_PICKUP] = -10
-        custom_reward_table[Event.FINAL_DROPOFF] = 1000
-        custom_reward_table[Event.PICKUP] = 10
+        custom_reward_table[Event.HIT_OBSTACLE] = -20
         custom_reward_table[Event.OUT_OF_TIME] = -200
-        custom_reward_table[Event.STEP] = -1
+        # custom_reward_table[Event.STEP] = -1
+
+        # Positive rewards
+        custom_reward_table[Event.FINAL_DROPOFF] = 1000
+        custom_reward_table[Event.PICKUP] = 15
+        custom_reward_table[Event.OBJECTIVE] = 2000
 
         # using the PettingZoo parallel API here
         return multi_taxi_v0.parallel_env(

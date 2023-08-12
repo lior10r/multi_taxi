@@ -949,7 +949,10 @@ class MultiTaxiEnv(ParallelEnv):
 
     def __move_taxi(self, taxi, move_action, infos, rewards):
         self.__add_reward(taxi.name, infos, rewards, Event.MOVE)
+
         new_loc = taxi.move(move_action, simulation=True)
+        self.__add_reward(taxi.name, infos, rewards, Event.MOVE, self.__dist_from_destination(taxi, new_loc))
+        
         infos[taxi.name]['move_success'] = False  # assume failure case, fix on success
         if not taxi.engine_on:
             self.__add_reward(taxi.name, infos, rewards, Event.USE_ENGINE_WHILE_OFF)
@@ -1078,9 +1081,22 @@ class MultiTaxiEnv(ParallelEnv):
 
         self.__add_reward(taxi_name, infos, rewards, Event.INTERMEDIATE_DROPOFF, r=r)
 
+    def location_dist(self, src, dst):
+        s_row, s_col = src
+        d_row, d_col = dst
+        return (abs(s_row - d_row) + abs(s_col - d_col))
+
+    def __dist_from_destination(self, taxi, new_loc):
+        if taxi.passengers:
+            passengers = sorted(taxi.passengers, key=lambda passenger: passenger.id)
+            dist = self.location_dist(taxi.location, passengers[0].destination)
+            new_dist = self.location_dist(new_loc, passengers[0].destination)
+            return 20*(dist - new_dist)
+
     def __add_reward(self, taxi_name, infos, rewards, event, r=None):
-        rewards[taxi_name] += self.reward_table[taxi_name][event] if r is None else r
-        infos[taxi_name]['events'].append(event)
+        added_reward = self.reward_table[taxi_name][event] if r is None else r
+        rewards[taxi_name] += added_reward
+        infos[taxi_name]['events'].append((event, added_reward))
 
     ######################
     # End Step Functions #
