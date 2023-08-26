@@ -30,11 +30,16 @@ import ray
 from ray import tune
 from ray.rllib.env import ParallelPettingZooEnv
 
+from pettingzoo.utils.wrappers import OrderEnforcingWrapper
 from pettingzoo import ParallelEnv
 from envs.multi_taxi import MultiTaxiCreator
+from envs.simple_tag import SimpleTagCreator
+
 from algorithms.ppo import PPOCreator
 from algorithms.dqn import DQNCreator
-from algorithms.algo_creator import AlgoCreator 
+from algorithms.algo_creator import AlgoCreator
+
+from supersuit.multiagent_wrappers.padding_wrappers import pad_observations_v0
 
 class ParallelEnvRunner:
 
@@ -47,7 +52,10 @@ class ParallelEnvRunner:
         self.config = config
         self.algorithm_name = algorithm_name
         
-        tune.register_env(self.env_name, lambda config: ParallelPettingZooEnv(self.create_env(config)))
+        actual_env = self.create_env(config)
+        actual_env = pad_observations_v0(actual_env)
+        tune.register_env(self.env_name, lambda config: ParallelPettingZooEnv(actual_env))
+        self.env = actual_env
 
 
     def __del__(self):
@@ -79,10 +87,11 @@ class ParallelEnvRunner:
             self.algorithm_name,
             name=self.algorithm_name,
             stop={"timesteps_total": 5000000},
-            checkpoint_freq=10,
+            checkpoint_freq=1,
             checkpoint_score_attr="episode_reward_mean",
             local_dir="ray_results/" + self.env_name,
             config=self.config.to_dict(),
+            resume="AUTO"
         )
 
 
@@ -93,17 +102,21 @@ class ParallelEnvRunner:
             agent.restore(checkpoint_path)
 
         # Setup the environment
-        obs = self.env.reset(seed=seed)
+        obs, _ = self.env.reset(seed=seed)
         self.env.render()
 
         reward_sum = 0
         i = 1
 
-        # TODO: Change this to stop when trunc or term say you should stop
         while True:
             # Get actions from the policy
-            action_dict = agent.compute_actions(obs)
-            self.print_actions(action_dict)
+            adversary_obs = {"adversary_0": obs["adversary_0"], "adversary_1": obs["adversary_1"]}
+            agent_obs = {"agent_0": obs["agent_0"]}
+
+            action_dict = agent.compute_actions(adversary_obs, policy_id="adversary")
+            action_dict.update(agent.compute_actions(agent_obs, policy_id="agent"))
+
+            # self.print_actions(action_dict)
             
             # Step the environment with the chosen actions
             next_obs, rewards, term, trunc, info = self.env.step(action_dict)
@@ -141,8 +154,8 @@ if __name__ == "__main__":
 
     algorithm = get_algorithm(args.algo)
 
-    runner = ParallelEnvRunner(MultiTaxiCreator.get_env_name(), MultiTaxiCreator.create_env(), 
-                               algorithm.get_algo_name(), algorithm.get_config(MultiTaxiCreator.get_env_name()))
+    runner = ParallelEnvRunner(SimpleTagCreator.get_env_name(), SimpleTagCreator.create_env(), 
+                               algorithm.get_algo_name(), algorithm.get_config(SimpleTagCreator.get_env_name()))
     if args.mode == 'train':
         runner.train()
     elif args.mode == 'evaluate':
