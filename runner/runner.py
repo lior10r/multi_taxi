@@ -154,7 +154,8 @@ if __name__ == "__main__":
 
     algorithm = get_algorithm(args.algo)
 
-    runner = ParallelEnvRunner(SimpleTagCreator.get_env_name(), SimpleTagCreator.create_env(), 
+    render_mode = 'human' if args.mode == 'evaluate' else None
+    runner = ParallelEnvRunner(SimpleTagCreator.get_env_name(), SimpleTagCreator.create_env(render_mode), 
                                algorithm.get_algo_name(), algorithm.get_config(SimpleTagCreator.get_env_name()))
     if args.mode == 'train':
         runner.train()
