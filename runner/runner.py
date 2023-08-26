@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
 
+import time
 import argparse
 
 from typing import Dict
@@ -135,7 +136,7 @@ class ParallelEnvRunner:
 
             obs = next_obs
 
-            # time.sleep(0.1)
+            time.sleep(0.01)
             self.env.render()
 
             print(f"Step {i} - Total Reward: {reward_sum}")

@@ -13,4 +13,4 @@ class SimpleTagCreator(EnvCreator):
     @staticmethod
     def create_env(render_mode=None):
         # using the PettingZoo parallel API here
-        return simple_tag_v3.parallel_env(num_good=1, num_adversaries=2, num_obstacles=0, continuous_actions=False, render_mode=render_mode)
+        return simple_tag_v3.parallel_env(num_good=1, num_adversaries=2, num_obstacles=0, max_cycles=256, continuous_actions=False, render_mode=render_mode)
