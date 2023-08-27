@@ -16,7 +16,7 @@ class DQNCreator(AlgoCreator):
             .framework(framework="tf")                                                          \
             .rollouts(num_rollout_workers=0, enable_connectors=False)                           \
             .multi_agent(                                                                       \
-            policies={'agent', 'adversary'},                                                    
+            policies={'agent', 'adversary'},            
             policy_mapping_fn=(lambda name, episode, worker, **kwargs: 'adversary' if 'adversary' in name else 'agent')   
             ).training(
                     train_batch_size=512,

@@ -31,9 +31,7 @@ import ray
 from ray import tune
 from ray.rllib.env import ParallelPettingZooEnv
 
-from pettingzoo.utils.wrappers import OrderEnforcingWrapper
 from pettingzoo import ParallelEnv
-from envs.multi_taxi import MultiTaxiCreator
 from envs.simple_tag import SimpleTagCreator
 
 from algorithms.ppo import PPOCreator
@@ -56,6 +54,8 @@ class ParallelEnvRunner:
         actual_env = self.create_env(config)
         actual_env = pad_observations_v0(actual_env)
         tune.register_env(self.env_name, lambda config: ParallelPettingZooEnv(actual_env))
+        
+        # Set back the wrapped env
         self.env = actual_env
 
 
@@ -67,18 +67,6 @@ class ParallelEnvRunner:
         This is a function called when registering a new env.
         '''
         return self.env
-    
-    def print_actions(self, actions: Dict[str, str]):
-        '''
-        Prints the actions the taxis have taken
-
-        @param - a dictionary of taxis and the action they made
-        '''
-
-        for taxi, action in actions.items():
-            for action_str, action_num in self.env.get_action_map(taxi).items():
-                if action_num == action:
-                    print(f"{taxi} - {action_str}")
 
     def train(self):
         '''
@@ -116,11 +104,9 @@ class ParallelEnvRunner:
 
             action_dict = agent.compute_actions(adversary_obs, policy_id="adversary")
             action_dict.update(agent.compute_actions(agent_obs, policy_id="agent"))
-
-            # self.print_actions(action_dict)
             
             # Step the environment with the chosen actions
-            next_obs, rewards, term, trunc, info = self.env.step(action_dict)
+            next_obs, rewards, term, trunc, _ = self.env.step(action_dict)
             
             # Update the episode reward
             reward_sum += sum(rewards.values())
