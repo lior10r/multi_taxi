@@ -4,7 +4,6 @@
 import time
 import argparse
 
-from typing import Dict
 from pathlib import Path
 
 def validate_path(path: str):
@@ -19,7 +18,7 @@ def validate_path(path: str):
 parser = argparse.ArgumentParser(description="Train or evaluate an agent")
 parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help="Choose 'train' or 'evaluate' mode")
 parser.add_argument("--checkpoint-path", type=validate_path, help="Checkpoint path for evaluation")
-parser.add_argument("--algo", type=str, choices=["ppo", "dqn"], default="ppo", help="The algorithm to run on the env")
+parser.add_argument("--algo", type=str, choices=["ppo", "dqn"], default="dqn", help="The algorithm to run on the env")
 
 try:
     import argcomplete
@@ -29,7 +28,8 @@ except ImportError:
 
 import ray
 from ray import tune
-from ray.rllib.env import ParallelPettingZooEnv
+
+from multi_taxi.wrappers.petting_zoo_parallel import ParallelPettingZooEnvWrapper
 
 from pettingzoo import ParallelEnv
 from envs.simple_tag import SimpleTagCreator
@@ -53,7 +53,7 @@ class ParallelEnvRunner:
         
         actual_env = self.create_env(config)
         actual_env = pad_observations_v0(actual_env)
-        tune.register_env(self.env_name, lambda config: ParallelPettingZooEnv(actual_env))
+        tune.register_env(self.env_name, lambda config: ParallelPettingZooEnvWrapper(actual_env))
         
         # Set back the wrapped env
         self.env = actual_env
