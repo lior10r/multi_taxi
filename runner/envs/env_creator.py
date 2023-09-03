@@ -10,3 +10,11 @@ class EnvCreator(ABC):
     def create_env():
         pass
 
+    @abstractmethod
+    def get_centrilazied():
+        pass
+    
+    @abstractmethod
+    def get_decentrilazied():
+        pass
+    
