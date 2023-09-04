@@ -20,6 +20,10 @@ parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help
 parser.add_argument("--checkpoint-path", type=validate_path, help="Checkpoint path for evaluation")
 parser.add_argument("--algo", type=str, choices=["ppo", "dqn"], default="dqn", help="The algorithm to run on the env")
 
+group = parser.add_mutually_exclusive_group(required=True)
+group.add_argument("-c", "--centralized", action='store_true', help="The algorithm will be centralized")
+group.add_argument("-d", "--decentralized", action='store_true', help="The algorithm will be decentralized")
+
 try:
     import argcomplete
     argcomplete.autocomplete(parser)
@@ -32,6 +36,7 @@ from ray import tune
 from multi_taxi.wrappers.petting_zoo_parallel import ParallelPettingZooEnvWrapper
 
 from pettingzoo import ParallelEnv
+from envs.env_creator import EnvCreator
 from envs.simple_tag import SimpleTagCreator
 
 from algorithms.ppo import PPOCreator
@@ -42,11 +47,16 @@ from supersuit.multiagent_wrappers.padding_wrappers import pad_observations_v0
 
 class ParallelEnvRunner:
 
-    def __init__(self, env_name: str, env: ParallelEnv, algorithm_name, config):
+    def __init__(self, env_creator: EnvCreator, env: ParallelEnv, algorithm_name, config, is_centralized=True):
         ray.init()
 
         self.env = env
-        self.env_name = env_name
+        self.env_name = env_creator.get_env_name()
+
+        # Set policies based on centralized vs decentralized
+        self.policies, self.policy_mapping_fn = env_creator.get_centralized() if is_centralized \
+                                                else env_creator.get_decentralized()
+        config.multi_agent(policies=self.policies, policy_mapping_fn=self.policy_mapping_fn)
 
         self.config = config
         self.algorithm_name = algorithm_name
@@ -94,16 +104,18 @@ class ParallelEnvRunner:
         obs, _ = self.env.reset(seed=seed)
         self.env.render()
 
+        observation_map = {policy:{} for policy in self.policies}
         reward_sum = 0
         i = 1
 
         while True:
             # Get actions from the policy
-            adversary_obs = {"adversary_0": obs["adversary_0"], "adversary_1": obs["adversary_1"]}
-            agent_obs = {"agent_0": obs["agent_0"]}
-
-            action_dict = agent.compute_actions(adversary_obs, policy_id="adversary")
-            action_dict.update(agent.compute_actions(agent_obs, policy_id="agent"))
+            for policy, observation in obs.items():
+                observation_map[self.policy_mapping_fn(policy, None, None)].update({policy: observation})
+            
+            action_dict = {}
+            for policy, observation in observation_map.items():
+                action_dict.update(agent.compute_actions(observation, policy_id=policy))    
             
             # Step the environment with the chosen actions
             next_obs, rewards, term, trunc, _ = self.env.step(action_dict)
@@ -142,8 +154,9 @@ if __name__ == "__main__":
     algorithm = get_algorithm(args.algo)
 
     render_mode = 'human' if args.mode == 'evaluate' else None
-    runner = ParallelEnvRunner(SimpleTagCreator.get_env_name(), SimpleTagCreator.create_env(render_mode), 
-                               algorithm.get_algo_name(), algorithm.get_config(SimpleTagCreator.get_env_name()))
+    runner = ParallelEnvRunner(SimpleTagCreator, SimpleTagCreator.create_env(render_mode), 
+                               algorithm.get_algo_name(), algorithm.get_config(SimpleTagCreator.get_env_name()),
+                               args.centralized)
     if args.mode == 'train':
         runner.train()
     elif args.mode == 'evaluate':
