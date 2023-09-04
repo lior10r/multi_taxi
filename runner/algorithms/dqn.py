@@ -15,10 +15,7 @@ class DQNCreator(AlgoCreator):
             .environment(env=env_name, disable_env_checking=True)                               \
             .framework(framework="tf")                                                          \
             .rollouts(num_rollout_workers=0, enable_connectors=False)                           \
-            .multi_agent(                                                                       \
-            policies={'agent', 'adversary'},            
-            policy_mapping_fn=(lambda name, episode, worker, **kwargs: 'adversary' if 'adversary' in name else 'agent')   
-            ).training(
+            .training(
                     train_batch_size=512,
                     lr=2e-5,
                     gamma=0.99,

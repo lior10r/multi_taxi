@@ -11,10 +11,10 @@ class EnvCreator(ABC):
         pass
 
     @abstractmethod
-    def get_centrilazied():
+    def get_centralized():
         pass
     
     @abstractmethod
-    def get_decentrilazied():
+    def get_decentralized():
         pass
     
