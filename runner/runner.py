@@ -19,6 +19,7 @@ parser = argparse.ArgumentParser(description="Train or evaluate an agent")
 parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help="Choose 'train' or 'evaluate' mode")
 parser.add_argument("--checkpoint-path", type=validate_path, help="Checkpoint path for evaluation")
 parser.add_argument("--algo", type=str, choices=["ppo", "dqn"], default="dqn", help="The algorithm to run on the env")
+parser.add_argument("-e", "--env", type=str, choices=["simple_tag", "city_learn"], default="simple_tag", help="The environment to run")
 
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument("-c", "--centralized", action='store_true', help="The algorithm will be centralized")
@@ -38,12 +39,12 @@ from multi_taxi.wrappers.petting_zoo_parallel import ParallelPettingZooEnvWrappe
 from pettingzoo import ParallelEnv
 from envs.env_creator import EnvCreator
 from envs.simple_tag import SimpleTagCreator
+from envs.city_learn import CityLearnCreator
 
 from algorithms.ppo import PPOCreator
 from algorithms.dqn import DQNCreator
 from algorithms.algo_creator import AlgoCreator
 
-from supersuit.multiagent_wrappers.padding_wrappers import pad_observations_v0
 
 class ParallelEnvRunner:
 
@@ -62,7 +63,6 @@ class ParallelEnvRunner:
         self.algorithm_name = algorithm_name
         
         actual_env = self.create_env(config)
-        actual_env = pad_observations_v0(actual_env)
         tune.register_env(self.env_name, lambda config: ParallelPettingZooEnvWrapper(actual_env))
         
         # Set back the wrapped env
@@ -147,15 +147,21 @@ def get_algorithm(algo_name: str) -> AlgoCreator:
     elif algo_name == "dqn":
         return DQNCreator
     
+def get_env(env_name: str) -> EnvCreator:
+    if env_name == "simple_tag":
+        return SimpleTagCreator
+    elif env_name == "city_learn":
+        return CityLearnCreator
 
 if __name__ == "__main__":
     args = parser.parse_args()
 
     algorithm = get_algorithm(args.algo)
+    env_creator = get_env(args.env)
 
     render_mode = 'human' if args.mode == 'evaluate' else None
-    runner = ParallelEnvRunner(SimpleTagCreator, SimpleTagCreator.create_env(render_mode), 
-                               algorithm.get_algo_name(), algorithm.get_config(SimpleTagCreator.get_env_name()),
+    runner = ParallelEnvRunner(env_creator, env_creator.create_env(render_mode), 
+                               algorithm.get_algo_name(), algorithm.get_config(env_creator.get_env_name()),
                                args.centralized)
     if args.mode == 'train':
         runner.train()

@@ -2,6 +2,8 @@ from .env_creator import EnvCreator
 
 from pettingzoo.mpe import simple_tag_v3
 
+from supersuit.multiagent_wrappers.padding_wrappers import pad_observations_v0
+
 class SimpleTagCreator(EnvCreator):
 
     ENV_NAME = "simple_tag"
@@ -13,7 +15,8 @@ class SimpleTagCreator(EnvCreator):
     @staticmethod
     def create_env(render_mode=None):
         # using the PettingZoo parallel API here
-        return simple_tag_v3.parallel_env(num_good=1, num_adversaries=2, num_obstacles=0, max_cycles=256, continuous_actions=False, render_mode=render_mode)
+        env = simple_tag_v3.parallel_env(num_good=1, num_adversaries=2, num_obstacles=0, max_cycles=256, continuous_actions=False, render_mode=render_mode)
+        return pad_observations_v0(env)
 
     @staticmethod
     def get_centralized():
