@@ -108,46 +108,68 @@ class DecentralizedRunner():
             # Insert to the policies dict
             self.policies[agent] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer)
 
-    def compute_action(self, state, policy_id):
-        sample = random.random()
-        eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
-            math.exp(-1. * self.steps_done / self.EPS_DECAY)
-        self.steps_done += 1
-        if sample > eps_threshold:
-            with torch.no_grad():
-                # t.max(1) will return the largest column value of each row.
-                # second column on max result is index of where max element was
-                # found, so we pick action with the larger expected reward.
-                return self.policies[policy_id].policy_net(state).max(1)[1].view(1, 1)
-        else:
-            return torch.tensor([[self.env.action_space(policy_id).sample()]], device=device, dtype=torch.long)
+    def compute_actions(self, state, policy_id, is_training=False):
+        # Convert state to tensor
+        state = self.convert_to_tensor(state)
+        # Compute policy action first
+        with torch.no_grad():
+            # t.max(1) will return the largest column value of each row.
+            # second column on max result is index of where max element was
+            # found, so we pick action with the larger expected reward.
+            policy_action = self.policies[policy_id].policy_net(state[policy_id]).max(1)[1].view(1, 1)
+
+        # If we are training the model we want to randomly choose an action once in a while
+        if is_training:
+            sample = random.random()
+            eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
+                            math.exp(-1. * self.steps_done / self.EPS_DECAY)
+            self.steps_done += 1
+            if sample < eps_threshold:
+                policy_action = torch.tensor([[self.env.action_space(policy_id).sample()]], device=device, dtype=torch.long)
+
+        # import IPython
+        # IPython.embed()
+        return self.convert_from_tensor({policy_id: policy_action})
 
     @staticmethod
-    def convert_from_tensor(actions):
-        new_actions = {}
-        for policy_id, action in actions.items():
-            # Convert the action from tensor to number
-            new_actions.update({policy_id: action.item()})
-    
-        return new_actions
-    
+    def convert_from_tensor(values):
+        new_values = {}
+        for policy_id, v in values.items():
+            # Convert the v from tensor to value
+            if isinstance(v, torch.Tensor):
+                new_values.update({policy_id: v.item()})
+            else:
+                new_values.update({policy_id: v})
+
+        return new_values
+
     @staticmethod
-    def convert_to_tensor(states):
+    def convert_to_tensor(values):
         '''
         Convert state to pytorch tensors
         '''
-        new_states = {}
-        for agent, state in states.items():
-            # Convert the state to tensor
-            new_states.update({agent: torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)})
+        new_values = {}
+        for agent, v in values.items():
+            # Convert the v to tensor if needed
+            if not isinstance(v, torch.Tensor):
+                dtype = torch.int64 if isinstance(v, int) else torch.float32
+                new_values.update({agent: torch.tensor(v, dtype=dtype, device=device).unsqueeze(0)})
+            else:
+                new_values.update({agent: v})
 
-        return new_states
+        return new_values
 
-    def compute_actions(self, state, is_training=False):
+    def compute_all_actions(self, state):
         actions = {}
         for policy_id, _ in self.policies.items():
-            actions.update({policy_id: self.compute_action(state[policy_id], policy_id)})
-        
+            actions.update(self.compute_actions(state, policy_id, True))
+
+        actions = self.convert_to_tensor(actions)
+
+        # Converting a tensor back and forth changes the dimension
+        # The reshape is needed to convert back to the original dimension
+        for policy_id, tensor in actions.items():
+            actions[policy_id] = tensor.reshape(-1, 1)
         return actions
 
     def optimize_model(self, policy_id):
@@ -197,7 +219,7 @@ class DecentralizedRunner():
         self.policies[policy_id].optimizer.step()
 
     def _train_policy(self, state, policy_id):
-        pass 
+        pass
 
     @staticmethod
     def add_reward(rewards_sum, reward):
@@ -211,7 +233,7 @@ class DecentralizedRunner():
             torch.save(networks.policy_net.state_dict() ,path)
 
     def train(self):
-        num_episodes = 200
+        num_episodes = 1000
         episode_durations = []
 
         for i_episode in range(num_episodes):
@@ -222,8 +244,8 @@ class DecentralizedRunner():
             episode_reward = {policy : 0 for policy in self.policies.keys()}
 
             for t in count():
-                action = self.compute_actions(state, is_training=True)
-                
+                action = self.compute_all_actions(state)
+
                 observation, reward, terminated, truncated, _ = env.step(self.convert_from_tensor(action))
                 self.add_reward(episode_reward, reward)
                 reward = self.convert_to_tensor(reward)
@@ -267,8 +289,9 @@ class DecentralizedRunner():
         plt.ioff()
         plt.show()
 
-env = SimpleTagCreator.create_env()
-runner = DecentralizedRunner(env)
-runner.train()
+if __name__ == "__main__":
+    env = SimpleTagCreator.create_env()
+    runner = DecentralizedRunner(env)
+    runner.train()
 
 

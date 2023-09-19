@@ -45,6 +45,8 @@ from algorithms.ppo import PPOCreator
 from algorithms.dqn import DQNCreator
 from algorithms.algo_creator import AlgoCreator
 
+from my_dqn import DecentralizedRunner
+
 
 class ParallelEnvRunner:
 
@@ -96,7 +98,7 @@ class ParallelEnvRunner:
 
     def evaluate(self, algorithm, checkpoint_path: str = None, seed: int = 42):
         # Create an agent to handle the environment
-        agent = algorithm(config=self.config)
+        agent = algorithm
         if checkpoint_path is not None:
             agent.restore(checkpoint_path)
 
@@ -166,4 +168,4 @@ if __name__ == "__main__":
     if args.mode == 'train':
         runner.train()
     elif args.mode == 'evaluate':
-        runner.evaluate(algorithm.get_algo(), args.checkpoint_path)
+        runner.evaluate(DecentralizedRunner(runner.env), args.checkpoint_path)
