@@ -18,7 +18,7 @@ def validate_path(path: str):
 parser = argparse.ArgumentParser(description="Train or evaluate an agent")
 parser.add_argument("--mode", choices=["train", "evaluate"], required=True, help="Choose 'train' or 'evaluate' mode")
 parser.add_argument("--checkpoint-path", type=validate_path, help="Checkpoint path for evaluation")
-parser.add_argument("--algo", type=str, choices=["ppo", "dqn"], default="dqn", help="The algorithm to run on the env")
+parser.add_argument("--algo", type=str, choices=["ppo", "dqn", "custom_dqn"], default="custom_dqn", help="The algorithm to run on the env")
 parser.add_argument("-e", "--env", type=str, choices=["simple_tag", "city_learn"], default="simple_tag", help="The environment to run")
 
 group = parser.add_mutually_exclusive_group(required=True)
@@ -43,9 +43,8 @@ from envs.city_learn import CityLearnCreator
 
 from algorithms.ppo import PPOCreator
 from algorithms.dqn import DQNCreator
+from algorithms.my_dqn import CustomDQNCreator
 from algorithms.algo_creator import AlgoCreator
-
-from my_dqn import DecentralizedRunner
 
 
 class ParallelEnvRunner:
@@ -98,7 +97,7 @@ class ParallelEnvRunner:
 
     def evaluate(self, algorithm, checkpoint_path: str = None, seed: int = 42):
         # Create an agent to handle the environment
-        agent = algorithm
+        agent = algorithm.get_algo(self.config, env=self.env, env_name=self.env_name)
         if checkpoint_path is not None:
             agent.restore(checkpoint_path)
 
@@ -148,6 +147,8 @@ def get_algorithm(algo_name: str) -> AlgoCreator:
         return PPOCreator
     elif algo_name == "dqn":
         return DQNCreator
+    elif algo_name == "custom_dqn":
+        return CustomDQNCreator
     
 def get_env(env_name: str) -> EnvCreator:
     if env_name == "simple_tag":
@@ -168,4 +169,4 @@ if __name__ == "__main__":
     if args.mode == 'train':
         runner.train()
     elif args.mode == 'evaluate':
-        runner.evaluate(DecentralizedRunner(runner.env), args.checkpoint_path)
+        runner.evaluate(algorithm, args.checkpoint_path)

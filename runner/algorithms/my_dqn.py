@@ -13,7 +13,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from envs.simple_tag import SimpleTagCreator
+from .algo_creator import AlgoCreator
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,24 +24,6 @@ Transition = namedtuple('Transition',
 Networks = namedtuple('Networks',
                       ('policy_net', 'target_net', 'memory', 'optimizer'))
 
-def plot_durations(episode_durations, show_result=False):
-    plt.figure(1)
-    durations_t = torch.tensor(episode_durations, dtype=torch.float)
-    if show_result:
-        plt.title('Result')
-    else:
-        plt.clf()
-        plt.title('Training...')
-    plt.xlabel('Episode')
-    plt.ylabel('Duration')
-    plt.plot(durations_t.numpy())
-    # Take 100 episode averages and plot them too
-    if len(durations_t) >= 100:
-        means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-        means = torch.cat((torch.zeros(99), means))
-        plt.plot(means.numpy())
-
-    plt.pause(0.001)  # pause a bit so that plots are updated
 
 class ReplayMemory(object):
 
@@ -85,38 +68,42 @@ class DecentralizedRunner():
     TAU = 0.005
     LR = 1e-4
 
-    def __init__(self, env):
+    def __init__(self, config, env):
+
         self.env = env
         self.steps_done = 0
 
+        self.policy_mapping_fn = config.multiagent['policy_mapping_fn']
+
         self.policies = {}
         for agent in env.possible_agents:
+            policy_name = self.policy_mapping_fn(agent, None, None)
+            # If we already created a policy from the agent skip this part
+            if policy_name in self.policies.keys():
+                continue
             # Get the size of the network
             n_obs = env.observation_space(agent).shape[0]
             n_act = env.action_space(agent).n
 
             # Create networks and helper classes
             policy_net = DQN(n_obs, n_act).to(device)
-            if exists(f"{agent}.torch"):
+            if exists(f"{policy_name}.torch"):
                 print("Found an existing model, loading...")
-                policy_net.load_state_dict(torch.load(f"{agent}.torch"))
+                policy_net.load_state_dict(torch.load(f"{policy_name}.torch"))
 
             target_net = DQN(n_obs, n_act).to(device)
             target_net.load_state_dict(policy_net.state_dict())
             optimizer = optim.AdamW(policy_net.parameters(), lr=self.LR, amsgrad=True)
 
             # Insert to the policies dict
-            self.policies[agent] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer)
+            self.policies[policy_name] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer)
 
-    def compute_actions(self, state, policy_id, is_training=False):
-        # Convert state to tensor
-        state = self.convert_to_tensor(state)
-        # Compute policy action first
+    def compute_single_action(self, state, policy_id, is_training=False):
         with torch.no_grad():
             # t.max(1) will return the largest column value of each row.
             # second column on max result is index of where max element was
             # found, so we pick action with the larger expected reward.
-            policy_action = self.policies[policy_id].policy_net(state[policy_id]).max(1)[1].view(1, 1)
+            policy_action = self.policies[policy_id].policy_net(state).max(1)[1].view(1, 1)
 
         # If we are training the model we want to randomly choose an action once in a while
         if is_training:
@@ -127,9 +114,18 @@ class DecentralizedRunner():
             if sample < eps_threshold:
                 policy_action = torch.tensor([[self.env.action_space(policy_id).sample()]], device=device, dtype=torch.long)
 
-        # import IPython
-        # IPython.embed()
-        return self.convert_from_tensor({policy_id: policy_action})
+        return policy_action
+
+
+    def compute_actions(self, state, policy_id, is_training=False):
+        # Convert state to tensor
+        state = self.convert_to_tensor(state)
+
+        actions = {}
+        for agent, obs in state.items():
+            actions[agent] = self.compute_single_action(obs, policy_id, is_training)
+
+        return self.convert_from_tensor(actions)
 
     @staticmethod
     def convert_from_tensor(values):
@@ -153,17 +149,22 @@ class DecentralizedRunner():
             # Convert the v to tensor if needed
             if not isinstance(v, torch.Tensor):
                 dtype = torch.int64 if isinstance(v, int) else torch.float32
-                new_values.update({agent: torch.tensor(v, dtype=dtype, device=device).unsqueeze(0)})
+                new_values[agent] = torch.tensor(v, dtype=dtype, device=device).unsqueeze(0)
             else:
-                new_values.update({agent: v})
+                new_values[agent] = v
 
         return new_values
 
     def compute_all_actions(self, state):
+        
+        observation_map = {}
+        for policy, observation in state.items():
+            observation_map[self.policy_mapping_fn(policy, None, None)].update({policy: observation})
+            
         actions = {}
-        for policy_id, _ in self.policies.items():
-            actions.update(self.compute_actions(state, policy_id, True))
-
+        for policy, observation in observation_map.items():
+            actions.update(self.compute_actions(observation, policy, True))    
+            
         actions = self.convert_to_tensor(actions)
 
         # Converting a tensor back and forth changes the dimension
@@ -280,18 +281,23 @@ class DecentralizedRunner():
                 if done:
                     pprint(episode_reward)
                     episode_durations.append(sum(episode_reward.values()))
-                    # plot_durations(episode_durations)
                     self.save_model()
                     break
 
         print('Complete')
-        plot_durations(episode_durations, show_result=True)
-        plt.ioff()
-        plt.show()
 
-if __name__ == "__main__":
-    env = SimpleTagCreator.create_env()
-    runner = DecentralizedRunner(env)
-    runner.train()
+from ray.rllib.algorithms.dqn import DQNConfig
 
+class CustomDQNCreator(AlgoCreator):
 
+    def get_algo(config, env=None, env_name=""):
+        return DecentralizedRunner(config, env)
+    
+    def get_algo_name():
+        return "CustomDQN"
+    
+    def get_config(env_name):
+        return DQNConfig()
+
+    def train(self):
+        self.get_algo().train()

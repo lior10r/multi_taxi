@@ -4,8 +4,8 @@ from ray.rllib.algorithms.dqn import DQN, DQNConfig
 
 class DQNCreator(AlgoCreator):
 
-    def get_algo():
-        return DQN
+    def get_algo(config, env=None, env_name=""):
+        return DQN(config=config)
     
     def get_algo_name():
         return "DQN"

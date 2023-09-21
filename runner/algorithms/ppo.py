@@ -4,9 +4,9 @@ from ray.rllib.algorithms.ppo import PPO, PPOConfig
 
 class PPOCreator(AlgoCreator):
 
-    def get_algo():
-        return PPO
-    
+    def get_algo(config, env=None, env_name=""):
+        return PPO(config=config)
+
     def get_algo_name():
         return "PPO"
     
