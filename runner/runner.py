@@ -49,8 +49,10 @@ from algorithms.algo_creator import AlgoCreator
 
 class ParallelEnvRunner:
 
-    def __init__(self, env_creator: EnvCreator, env: ParallelEnv, algorithm_name, config, is_centralized=True):
+    def __init__(self, env_creator: EnvCreator, env: ParallelEnv, algorithm: AlgoCreator, is_centralized=True):
         ray.init()
+
+        self.algorithm = algorithm
 
         self.env = env
         self.env_name = env_creator.get_env_name()
@@ -58,12 +60,10 @@ class ParallelEnvRunner:
         # Set policies based on centralized vs decentralized
         self.policies, self.policy_mapping_fn = env_creator.get_centralized() if is_centralized \
                                                 else env_creator.get_decentralized()
-        config.multi_agent(policies=self.policies, policy_mapping_fn=self.policy_mapping_fn)
+        self.config = self.algorithm.get_config(self.env_name)
+        self.config.multi_agent(policies=self.policies, policy_mapping_fn=self.policy_mapping_fn)
 
-        self.config = config
-        self.algorithm_name = algorithm_name
-        
-        actual_env = self.create_env(config)
+        actual_env = self.create_env()
         tune.register_env(self.env_name, lambda config: ParallelPettingZooEnvWrapper(actual_env))
         
         # Set back the wrapped env
@@ -73,7 +73,7 @@ class ParallelEnvRunner:
     def __del__(self):
         ray.shutdown()
 
-    def create_env(self, config):
+    def create_env(self):
         '''
         This is a function called when registering a new env.
         '''
@@ -83,21 +83,13 @@ class ParallelEnvRunner:
         '''
         This is the function used to train the policy
         '''
-        tune.run(
-            self.algorithm_name,
-            name=self.algorithm_name,
-            stop={"timesteps_total": 5000000},
-            checkpoint_freq=1,
-            checkpoint_score_attr="episode_reward_mean",
-            local_dir="ray_results/" + self.env_name,
-            config=self.config.to_dict(),
-            resume="AUTO"
-        )
+        # Algorithm is not an instance of AlgoCreator so We need to create one this is why we call the constructor.
+        self.algorithm.train(self.config, self.env, self.env_name)
 
 
-    def evaluate(self, algorithm, checkpoint_path: str = None, seed: int = 42):
+    def evaluate(self, checkpoint_path: str = None, seed: int = 42):
         # Create an agent to handle the environment
-        agent = algorithm.get_algo(self.config, env=self.env, env_name=self.env_name)
+        agent = self.algorithm.get_algo(self.config, env=self.env, env_name=self.env_name)
         if checkpoint_path is not None:
             agent.restore(checkpoint_path)
 
@@ -144,11 +136,11 @@ class ParallelEnvRunner:
 
 def get_algorithm(algo_name: str) -> AlgoCreator:
     if algo_name == "ppo":
-        return PPOCreator
+        return PPOCreator()
     elif algo_name == "dqn":
-        return DQNCreator
+        return DQNCreator()
     elif algo_name == "custom_dqn":
-        return CustomDQNCreator
+        return CustomDQNCreator()
     
 def get_env(env_name: str) -> EnvCreator:
     if env_name == "simple_tag":
@@ -164,9 +156,8 @@ if __name__ == "__main__":
 
     render_mode = 'human' if args.mode == 'evaluate' else None
     runner = ParallelEnvRunner(env_creator, env_creator.create_env(render_mode), 
-                               algorithm.get_algo_name(), algorithm.get_config(env_creator.get_env_name()),
-                               args.centralized)
+                               algorithm, args.centralized)
     if args.mode == 'train':
         runner.train()
     elif args.mode == 'evaluate':
-        runner.evaluate(algorithm, args.checkpoint_path)
+        runner.evaluate(args.checkpoint_path)

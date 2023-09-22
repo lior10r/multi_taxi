@@ -58,7 +58,7 @@ class DQN(nn.Module):
         x = F.relu(self.layer2(x))
         return self.layer3(x)
 
-class DecentralizedRunner():
+class Controller():
 
     BATCH_SIZE = 128
     GAMMA = 0.99
@@ -98,7 +98,7 @@ class DecentralizedRunner():
             # Insert to the policies dict
             self.policies[policy_name] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer)
 
-    def compute_single_action(self, state, policy_id, is_training=False):
+    def compute_single_action(self, state, policy_id, agent=None, is_training=False):
         with torch.no_grad():
             # t.max(1) will return the largest column value of each row.
             # second column on max result is index of where max element was
@@ -107,12 +107,13 @@ class DecentralizedRunner():
 
         # If we are training the model we want to randomly choose an action once in a while
         if is_training:
+            assert agent is not None, "agent must be provided when training"
             sample = random.random()
             eps_threshold = self.EPS_END + (self.EPS_START - self.EPS_END) * \
                             math.exp(-1. * self.steps_done / self.EPS_DECAY)
             self.steps_done += 1
             if sample < eps_threshold:
-                policy_action = torch.tensor([[self.env.action_space(policy_id).sample()]], device=device, dtype=torch.long)
+                policy_action = torch.tensor([[self.env.action_space(agent).sample()]], device=device, dtype=torch.long)
 
         return policy_action
 
@@ -123,7 +124,7 @@ class DecentralizedRunner():
 
         actions = {}
         for agent, obs in state.items():
-            actions[agent] = self.compute_single_action(obs, policy_id, is_training)
+            actions[agent] = self.compute_single_action(obs, policy_id, agent, is_training)
 
         return self.convert_from_tensor(actions)
 
@@ -156,8 +157,7 @@ class DecentralizedRunner():
         return new_values
 
     def compute_all_actions(self, state):
-        
-        observation_map = {}
+        observation_map = {policy:{} for policy in self.policies}
         for policy, observation in state.items():
             observation_map[self.policy_mapping_fn(policy, None, None)].update({policy: observation})
             
@@ -222,10 +222,9 @@ class DecentralizedRunner():
     def _train_policy(self, state, policy_id):
         pass
 
-    @staticmethod
-    def add_reward(rewards_sum, reward):
+    def add_reward(self, rewards_sum, reward):
         for policy, reward_value in reward.items():
-            rewards_sum[policy] += reward_value
+            rewards_sum[self.policy_mapping_fn(policy, None, None)] += reward_value
 
     def save_model(self):
         for policy, networks in self.policies.items():
@@ -234,20 +233,20 @@ class DecentralizedRunner():
             torch.save(networks.policy_net.state_dict() ,path)
 
     def train(self):
-        num_episodes = 1000
+        num_episodes = 100000
         episode_durations = []
 
         for i_episode in range(num_episodes):
             print(f"Running episode number {i_episode}")
             # Initialize the environment and get it's state
-            state, info = env.reset()
+            state, info = self.env.reset()
             state = self.convert_to_tensor(state)
             episode_reward = {policy : 0 for policy in self.policies.keys()}
 
             for t in count():
                 action = self.compute_all_actions(state)
 
-                observation, reward, terminated, truncated, _ = env.step(self.convert_from_tensor(action))
+                observation, reward, terminated, truncated, _ = self.env.step(self.convert_from_tensor(action))
                 self.add_reward(episode_reward, reward)
                 reward = self.convert_to_tensor(reward)
                 done = all(terminated.values()) or all(truncated.values())
@@ -257,23 +256,28 @@ class DecentralizedRunner():
                 else:
                     next_state = self.convert_to_tensor(observation)
 
-                for policy, networks in self.policies.items():
+                for agent in self.env.possible_agents:
                     # Store the transition in memory
+                    policy = self.policy_mapping_fn(agent, None, None)
+                    network = self.policies[policy]
                     if next_state is not None:
-                        networks.memory.push(state[policy], action[policy], next_state[policy], reward[policy])
+                        network.memory.push(state[agent], action[agent], next_state[agent], reward[agent])
                     else:
-                        networks.memory.push(state[policy], action[policy], None, reward[policy])
+                        network.memory.push(state[agent], action[agent], None, reward[agent])
 
+                for agent in self.env.possible_agents:
+                    policy = self.policy_mapping_fn(agent, None, None)
+                    network = self.policies[policy]
                     # Perform one step of the optimization (on the policy network)
                     self.optimize_model(policy)
 
                     # Soft update of the target network's weights
                     # θ′ ← τ θ + (1 −τ )θ′
-                    target_net_state_dict = networks.target_net.state_dict()
-                    policy_net_state_dict = networks.policy_net.state_dict()
+                    target_net_state_dict = network.target_net.state_dict()
+                    policy_net_state_dict = network.policy_net.state_dict()
                     for key in policy_net_state_dict:
                         target_net_state_dict[key] = policy_net_state_dict[key]*self.TAU + target_net_state_dict[key]*(1-self.TAU)
-                    networks.target_net.load_state_dict(target_net_state_dict)
+                    network.target_net.load_state_dict(target_net_state_dict)
 
                 # Move to the next state
                 state = next_state
@@ -290,14 +294,14 @@ from ray.rllib.algorithms.dqn import DQNConfig
 
 class CustomDQNCreator(AlgoCreator):
 
-    def get_algo(config, env=None, env_name=""):
-        return DecentralizedRunner(config, env)
+    def get_algo(self, config, env=None, env_name=""):
+        return Controller(config, env)
     
-    def get_algo_name():
+    def get_algo_name(self):
         return "CustomDQN"
     
-    def get_config(env_name):
+    def get_config(self, env_name):
         return DQNConfig()
 
-    def train(self):
-        self.get_algo().train()
+    def train(self, config, env=None, env_name=""):
+        self.get_algo(config, env).train()
