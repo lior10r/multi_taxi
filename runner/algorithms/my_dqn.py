@@ -1,10 +1,9 @@
-
 import math
 import random
 import matplotlib
 import matplotlib.pyplot as plt
 from pprint import pprint
-from os.path import exists
+from os.path import exists, join
 from itertools import count
 from collections import namedtuple, deque
 
@@ -68,9 +67,12 @@ class Controller():
     TAU = 0.005
     LR = 1e-4
 
-    def __init__(self, config, env):
+    RESULTS_PATH = "torch_results/"
+
+    def __init__(self, config, env, env_name):
 
         self.env = env
+        self.env_name = env_name
         self.steps_done = 0
 
         self.policy_mapping_fn = config.multiagent['policy_mapping_fn']
@@ -87,9 +89,10 @@ class Controller():
 
             # Create networks and helper classes
             policy_net = DQN(n_obs, n_act).to(device)
-            if exists(f"{policy_name}.torch"):
+            saved_policy_path = join(self.RESULTS_PATH, self.env_name, f"{policy_name}.torch")
+            if exists(saved_policy_path):
                 print("Found an existing model, loading...")
-                policy_net.load_state_dict(torch.load(f"{policy_name}.torch"))
+                policy_net.load_state_dict(torch.load(saved_policy_path))
 
             target_net = DQN(n_obs, n_act).to(device)
             target_net.load_state_dict(policy_net.state_dict())
@@ -228,7 +231,7 @@ class Controller():
 
     def save_model(self):
         for policy, networks in self.policies.items():
-            path = f"{policy}.torch"
+            path = join(self.RESULTS_PATH, self.env_name, f"{policy}.torch")
             print(f"Saving model of {policy} at {path}")
             torch.save(networks.policy_net.state_dict() ,path)
 
@@ -295,7 +298,7 @@ from ray.rllib.algorithms.dqn import DQNConfig
 class CustomDQNCreator(AlgoCreator):
 
     def get_algo(self, config, env=None, env_name=""):
-        return Controller(config, env)
+        return Controller(config, env, env_name)
     
     def get_algo_name(self):
         return "CustomDQN"
@@ -304,4 +307,4 @@ class CustomDQNCreator(AlgoCreator):
         return DQNConfig()
 
     def train(self, config, env=None, env_name=""):
-        self.get_algo(config, env).train()
+        self.get_algo(config, env, env_name).train()
