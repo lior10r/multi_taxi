@@ -1,11 +1,8 @@
 import math
 import random
-import matplotlib
-import matplotlib.pyplot as plt
-from pprint import pprint
-from os.path import exists, join
-from itertools import count
-from collections import namedtuple, deque
+from os import makedirs
+from os.path import exists, join, dirname
+from collections import namedtuple, deque, Counter
 
 import torch
 import torch.nn as nn
@@ -21,7 +18,7 @@ Transition = namedtuple('Transition',
                         ('state', 'action', 'next_state', 'reward'))
 
 Networks = namedtuple('Networks',
-                      ('policy_net', 'target_net', 'memory', 'optimizer'))
+                      ('policy_net', 'target_net', 'memory', 'optimizer', 'iteration'))
 
 
 class ReplayMemory(object):
@@ -89,17 +86,21 @@ class Controller():
 
             # Create networks and helper classes
             policy_net = DQN(n_obs, n_act).to(device)
+            optimizer = optim.AdamW(policy_net.parameters(), lr=self.LR, amsgrad=True)
+            iteration = Counter()
             saved_policy_path = join(self.RESULTS_PATH, self.env_name, f"{policy_name}.torch")
             if exists(saved_policy_path):
                 print("Found an existing model, loading...")
-                policy_net.load_state_dict(torch.load(saved_policy_path))
+                checkpoint = torch.load(saved_policy_path)
+                policy_net.load_state_dict(checkpoint['model_state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                iteration['i'] = checkpoint['iteration']
 
             target_net = DQN(n_obs, n_act).to(device)
             target_net.load_state_dict(policy_net.state_dict())
-            optimizer = optim.AdamW(policy_net.parameters(), lr=self.LR, amsgrad=True)
 
             # Insert to the policies dict
-            self.policies[policy_name] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer)
+            self.policies[policy_name] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer, iteration)
 
     def compute_single_action(self, state, policy_id, agent=None, is_training=False):
         with torch.no_grad():
@@ -222,9 +223,6 @@ class Controller():
         torch.nn.utils.clip_grad_value_(self.policies[policy_id].policy_net.parameters(), 100)
         self.policies[policy_id].optimizer.step()
 
-    def _train_policy(self, state, policy_id):
-        pass
-
     def add_reward(self, rewards_sum, reward):
         for policy, reward_value in reward.items():
             rewards_sum[self.policy_mapping_fn(policy, None, None)] += reward_value
@@ -232,12 +230,16 @@ class Controller():
     def save_model(self):
         for policy, networks in self.policies.items():
             path = join(self.RESULTS_PATH, self.env_name, f"{policy}.torch")
-            print(f"Saving model of {policy} at {path}")
-            torch.save(networks.policy_net.state_dict() ,path)
+            makedirs(dirname(path), exist_ok=True)
+            print(f"Saving iteration {networks.iteration['i']} of {policy} at {path}")
+            torch.save({
+                'model_state_dict': networks.policy_net.state_dict(),
+                'optimizer_state_dict': networks.optimizer.state_dict(),
+                'iteration': networks.iteration.get('i')} ,path)
+            networks.iteration.update('i')
 
     def train(self):
         num_episodes = 100000
-        episode_durations = []
 
         for i_episode in range(num_episodes):
             print(f"Running episode number {i_episode}")
@@ -245,8 +247,9 @@ class Controller():
             state, info = self.env.reset()
             state = self.convert_to_tensor(state)
             episode_reward = {policy : 0 for policy in self.policies.keys()}
-
-            for t in count():
+            
+            done = False
+            while not done:
                 action = self.compute_all_actions(state)
 
                 observation, reward, terminated, truncated, _ = self.env.step(self.convert_from_tensor(action))
@@ -285,11 +288,8 @@ class Controller():
                 # Move to the next state
                 state = next_state
 
-                if done:
-                    pprint(episode_reward)
-                    episode_durations.append(sum(episode_reward.values()))
-                    self.save_model()
-                    break
+            print(episode_reward)
+            self.save_model()
 
         print('Complete')
 
