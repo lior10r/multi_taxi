@@ -1,6 +1,6 @@
 import math
 import random
-from os import makedirs
+from os import makedirs, listdir
 from os.path import exists, join, dirname
 from collections import namedtuple, deque, Counter
 
@@ -40,7 +40,6 @@ class DQN(nn.Module):
 
     HIDDEN_LAYER_SIZE = 128
 
-    # TODO: Change this to get env instead. And get from it the sizes
     def __init__(self, n_observations, n_actions):
         super(DQN, self).__init__()
         self.layer1 = nn.Linear(n_observations, self.HIDDEN_LAYER_SIZE)
@@ -65,6 +64,7 @@ class Controller():
     LR = 1e-4
 
     RESULTS_PATH = "torch_results/"
+    SAVE_FREQ = 10
 
     def __init__(self, config, env, env_name):
 
@@ -88,19 +88,34 @@ class Controller():
             policy_net = DQN(n_obs, n_act).to(device)
             optimizer = optim.AdamW(policy_net.parameters(), lr=self.LR, amsgrad=True)
             iteration = Counter()
-            saved_policy_path = join(self.RESULTS_PATH, self.env_name, f"{policy_name}.torch")
-            if exists(saved_policy_path):
-                print("Found an existing model, loading...")
-                checkpoint = torch.load(saved_policy_path)
-                policy_net.load_state_dict(checkpoint['model_state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                iteration['i'] = checkpoint['iteration']
+            dir_name = self.load_checkpoint(policy_name)
+            if dir_name is not None:
+                saved_policy_path = join(self.RESULTS_PATH, self.env_name, dir_name, f"{policy_name}.torch")
+                if exists(saved_policy_path):
+                    print(f"Found an existing model at {saved_policy_path}, loading...")
+                    checkpoint = torch.load(saved_policy_path)
+                    policy_net.load_state_dict(checkpoint['model_state_dict'])
+                    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                    iteration['i'] = checkpoint['iteration']
 
             target_net = DQN(n_obs, n_act).to(device)
             target_net.load_state_dict(policy_net.state_dict())
 
             # Insert to the policies dict
             self.policies[policy_name] = Networks(policy_net, target_net, ReplayMemory(10000), optimizer, iteration)
+
+    def load_checkpoint(self, policy_name):
+        base_path = join(self.RESULTS_PATH, self.env_name)
+        if not exists(base_path):
+            return
+        
+        dirs = listdir(base_path)
+        if not dirs:
+            return
+        
+        # Returns the last checkpoint found based on the highest number
+        checkpoints_found = sorted(filter(lambda dir: dir.startswith("checkpoint_"), dirs))
+        return checkpoints_found[-1] if checkpoints_found else None
 
     def compute_single_action(self, state, policy_id, agent=None, is_training=False):
         with torch.no_grad():
@@ -229,22 +244,25 @@ class Controller():
 
     def save_model(self):
         for policy, networks in self.policies.items():
-            path = join(self.RESULTS_PATH, self.env_name, f"{policy}.torch")
+            iteration = networks.iteration.get('i') or 0
+            networks.iteration.update('i')
+            if iteration % self.SAVE_FREQ != 0:
+                continue
+            path = join(self.RESULTS_PATH, self.env_name, f"checkpoint_{str(iteration).zfill(5)}", f"{policy}.torch")
             makedirs(dirname(path), exist_ok=True)
-            print(f"Saving iteration {networks.iteration['i']} of {policy} at {path}")
+            print(f"Saving iteration {iteration} of {policy} at {path}")
             torch.save({
                 'model_state_dict': networks.policy_net.state_dict(),
                 'optimizer_state_dict': networks.optimizer.state_dict(),
-                'iteration': networks.iteration.get('i')} ,path)
-            networks.iteration.update('i')
+                'iteration': iteration} ,path)
 
     def train(self):
-        num_episodes = 100000
+        num_episodes = 2000
 
         for i_episode in range(num_episodes):
             print(f"Running episode number {i_episode}")
             # Initialize the environment and get it's state
-            state, info = self.env.reset()
+            state, info = self.env.reset(seed=42)
             state = self.convert_to_tensor(state)
             episode_reward = {policy : 0 for policy in self.policies.keys()}
             
