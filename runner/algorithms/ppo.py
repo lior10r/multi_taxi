@@ -4,13 +4,13 @@ from ray.rllib.algorithms.ppo import PPO, PPOConfig
 
 class PPOCreator(AlgoCreator):
 
-    def get_algo():
-        return PPO
-    
-    def get_algo_name():
+    def get_algo(self, config, env=None, env_name=""):
+        return PPO(config=config)
+
+    def get_algo_name(self):
         return "PPO"
     
-    def get_config(env_name):
+    def get_config(self, env_name):
         return PPOConfig()                                              \
             .environment(env=env_name, disable_env_checking=True)       \
             .framework(framework="tf")                                  \
